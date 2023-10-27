@@ -22,8 +22,7 @@ resource "hashicups_order" "test" {
   }
 }
 `,
-				Check: resource.ComposeAggregateTestCheckFunc(
-				),
+				Check: resource.ComposeAggregateTestCheckFunc(),
 			},
 		},
 	})
