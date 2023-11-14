@@ -9,13 +9,15 @@ import (
 	"strconv"
 
 	"github.com/hashicorp-demoapp/hashicups-client-go"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 // Ensure the implementation satisfies the expected interfaces.
@@ -49,6 +51,54 @@ type orderItemModel struct {
 	FlagB types.Bool `tfsdk:"flag_b"`
 }
 
+type theModifier struct{}
+
+func (*theModifier) Description(context.Context) string {
+	return "Workaround modifier for setting default values for flags inside set nested objects"
+
+}
+
+func (m *theModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (*theModifier) PlanModifySet(ctx context.Context, req planmodifier.SetRequest, resp *planmodifier.SetResponse) {
+	var diags diag.Diagnostics
+
+	configElements := req.ConfigValue.Elements()
+	planElements := make([]attr.Value, len(configElements))
+	for i, element := range configElements {
+		objElement := element.(basetypes.ObjectValue)
+		attrs := objElement.Attributes()
+		var flagA attr.Value = types.BoolValue(false)
+		if !attrs["flag_a"].IsUnknown() && !attrs["flag_a"].IsNull() {
+			flagA = attrs["flag_a"]
+		}
+		var flagB attr.Value = types.BoolValue(false)
+		if !attrs["flag_b"].IsUnknown() && !attrs["flag_b"].IsNull() {
+			flagB = attrs["flag_b"]
+		}
+		planElements[i], diags = types.ObjectValue(
+			objElement.AttributeTypes(ctx),
+			map[string]attr.Value{
+				"flag_a": flagA,
+				"flag_b": flagB,
+			},
+		)
+		resp.Diagnostics.Append(diags...)
+		if diags.HasError() {
+			return
+		}
+	}
+	resp.PlanValue, diags = basetypes.NewSetValue(req.ConfigValue.ElementType(ctx), planElements)
+	resp.Diagnostics.Append(diags...)
+	if diags.HasError() {
+		return
+	}
+}
+
+var myModifier planmodifier.Set = &theModifier{}
+
 // Metadata returns the resource type name.
 func (r *orderResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_order"
@@ -69,18 +119,19 @@ func (r *orderResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 		},
 		Blocks: map[string]schema.Block{
 			"item": schema.SetNestedBlock{
+				PlanModifiers: []planmodifier.Set{
+					myModifier,
+				},
 				// Description: "List of items in the order.",
 				NestedObject: schema.NestedBlockObject{
 					Attributes: map[string]schema.Attribute{
 						"flag_a": schema.BoolAttribute{
 							Optional: true,
 							Computed: true,
-							Default:  booldefault.StaticBool(false),
 						},
 						"flag_b": schema.BoolAttribute{
 							Optional: true,
 							Computed: true,
-							Default:  booldefault.StaticBool(false),
 						},
 					},
 				},
